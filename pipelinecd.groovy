@@ -12,7 +12,7 @@ pipeline {
         stage('Descargar desde Nexus') {
             steps {
                 script {
-                    def APLICACION = """${APLICACION}""".split('-')[0]
+                    def APLICACION = """${APLICACION}""".split('-')[0]//se obtiene solo el nombre de la aplicación
                     def NEXUS_URL = """http://servidor/nexus/repository/${APLICACION}/prod/"""
                                         
                     withCredentials([usernamePassword(credentialsId: 'jenkins_nexus', usernameVariable: 'NEXUS_USERNAME', passwordVariable: 'NEXUS_PASSWORD')]) {
@@ -25,13 +25,14 @@ pipeline {
         stage('Descomprimir Archivos') {
             steps {
                 script {
-                    def archivoZip = "${ARTIFACT_PATH}"
+                    def archivoZip = "${ARTIFACT_PATH}" //nombre del comprimido que se descarga de nexus
+                    def APLICACION = """${APLICACION}""".split('-')[0]//se obtiene solo el nombre de la aplicación
 
                     //consulta si el archivo existe, si no existe da el mensaje de error, si existe lo descomprime
                     if (!fileExists(archivoZip)) {
                         error "Archivo ZIP no encontrado: ${archivoZip}"
                     } else {
-                        bat "unzip -o ${archivoZip} -d ."
+                        bat "unzip -o ${archivoZip} -d .\\${APLICACION}" //descompresión del archivo en la carpeta correspondiente a la aplicación
                     }
 
                     //consulta si el archivo existe, entonces borra el .zip, sino informa mendiante mensaje
@@ -46,27 +47,13 @@ pipeline {
 
         stage('Copiar a otro servidor Windows') {
             steps {
-                script {
-                    def failures = []
-                    def successful = []
-                    def commands = []
-
-                    wrap([$class: 'BuildUser']) {
-                        userId = "${BUILD_USER_ID}"
-                        user = "${BUILD_USER}"
-                        mailuser = "${BUILD_USER_EMAIL}"
-                    }
-
-                    Date date = new Date()
-                    String fecha = date.format("yyyy-MM-dd-HH-mm")
-                    to_email = mailuser
-                    
+                script { 
                     //cierra sesiones y libera archivos
                     try {
                         def lista = jsonParse("${APLICACION}")
                         def APP_SESION = APLICACION.split('-')[1]
                         println APP_SESION
-                        def JOB_NAME="${JOB_NAME.substring(JOB_NAME.lastIndexOf('/') + 1, JOB_NAME.length())}"
+                        def JOB_NAME="${JOB_NAME.substring(JOB_NAME.lastIndexOf('/') + 1, JOB_NAME.length())}"//se obtiene solo el nombre del job 
 
                         if (APP_SESION == 'Sucursal'){
                             lista.each { 
@@ -77,16 +64,18 @@ pipeline {
                                 def listaArchivos = txts.split(' ')
 
                                 for (i = 0; i < listaArchivos.size(); i++) { 
-                                  
+                                    //trae las sesiones
                                     def infoSesiones = bat(returnStdout: true, script: "qwinsta /server:${servidor}")
                                     println infoSesiones
 
+                                    //mete la información de infoSesiones en la variable lines
                                     def lines = infoSesiones.readLines()
+                                    //creación de variable tipo array sesionesActivas
                                     def sesionesActivas = []
                         
                                     // Filtrar las líneas que contienen "Active"
                                     lines.each { line ->
-                                        if (line.contains('Active')) {
+                                        if (line.contains('Active')) {//arma el array con las lineas de sesiones activas que se encuentran
                                             sesionesActivas.add(line)
                                         }
                                     }
@@ -98,8 +87,8 @@ pipeline {
                                             println sesionesActivas[i]
                                             actSession = sesionesActivas[i].tokenize()//con esa posición genera un nuevo array 
                                             println actSession[2]
-                                            actSession_id = actSession[2]
-                                            bat "logoff ${actSession_id}"
+                                            actSession_id = actSession[2] //trae solo el id de la sesión activa y lo guarda en una variable
+                                            bat "logoff ${actSession_id}" //cierra la sesión referente al id almacenado en la variable
                                         }
                                     }
 
@@ -111,6 +100,8 @@ pipeline {
                                     if (app_act_int > 1 ) { //si la variable es mayor a 1 entonces cierra las aplicaciones
                                         bat "TASKKILL /F /IM ${archivos} /T"// termina el proceso y todos los procesos asociados
                                     } 
+
+                                    def APLICACION = """${APLICACION}""".split('-')[0]
 
                                     def ip = servidor
                                     //echo servidor
@@ -158,6 +149,8 @@ pipeline {
                         } 
                         else {
                             lista.each{
+                                def APLICACION = """${APLICACION}""".split('-')[0]
+                                
                                 def servidor = it.servidor
                                 def path = it.path
 
@@ -189,24 +182,16 @@ pipeline {
                                 //echo archivosDescomprimidos
 
                                 //bat "xcopy ${archivosDescomprimidos} ${destinoServidor} /E /Y /I"  
-                                
                             }
                         }
 
-                        //bat "rmdir /s /q ${JOB_NAME}"
-                        //bat "mkdir ${JOB_NAME}"  
-
-                        commands.each {
-                            def commandResult3 = bat(returnStdout: true, script: it)
-                            echo "${it}"
-                            successful << commandResult3 + "\n"
-                        }
-         
+                        println 'Se elimina carpeta con archivos implementados'
+                        def APLICACION = """${APLICACION}""".split('-')[0]
+                        bat "rmdir /s /q ${APLICACION}"
                     } 
 
                     finally{
-            
-                        echo 'I will always say Hello again!'
+                        echo 'Se envía mail con log de ejecución'
                         
                         emailext attachLog: true,//no adjunta el log de la ejecución del pipeline 
                         //attachmentsPattern: '*.txt', //adjunta los files .txt
@@ -214,8 +199,7 @@ pipeline {
                         to:"",//inserta los mails que se encuentran en la variable para que se los envien
                         body: "Scripts ejecutado: ${env.BUILD_URL}", //cuerpo de email
                         subject: "Resultados: Job ${env.JOB_NAME}" //titulo de email
-                    }
-                                
+                    }           
                 }
             }
         }
@@ -223,9 +207,9 @@ pipeline {
 }
 
 @NonCPS
-def jsonParse(def app) { //acceso a listado en base de datos en phpMyAdmin 
+def jsonParse(def app) {
     try {
-        def url = "http://servidor:8000/despliegues/listado_despliegues/${app}"
+        def url = "http://servidor/despliegues/listado_despliegues/${app}"
         def postmanGet = new URL("${url}")
         def getConnection = postmanGet.openConnection()
         getConnection.requestMethod = 'GET'
@@ -238,37 +222,5 @@ def jsonParse(def app) { //acceso a listado en base de datos en phpMyAdmin
     }
 }
 
-@NonCPS
-def createReport(successful, failures, duration) {
-    def message = new StringBuilder()
-    message << "<p><h3><strong>Cerrar archivos XFS - ${APLICACION}</strong></h3></p>"
-    message << "<p>Operador: ${user}</p>"
 
-    if (duration != '') {
-        message << "<p>Duración de la consulta: ${duration}</p>"
-    }
 
-    if (!successful.isEmpty()) {
-        message << "<p>Pasos Correctos:</p>"
-        message << "<ul>"
-        message << successful.collect { "<li>${it}</li>" }.join('\n')
-        message << "</ul>"
-    }
-
-    if (!failures.isEmpty()) {
-        message << "<p>Pasos con conflictos:</p>"
-        message << "<ul>"
-        message << failures.collect { "<li>${it}</li>" }.join('\n')
-        message << "</ul>"
-    }
-
-    return message.toString()
-}
-
-@NonCPS
-def clearTmpPath(tmp) {
-    def file = new File(tmp)
-    if (file.exists()) {
-        file.deleteDir()
-    }
-}
